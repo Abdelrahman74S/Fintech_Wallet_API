@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from .auth.router import router as auth_router
 from .wallets.router import router as wallet_router
+from .Transaction.router import router as transaction_router
 from .config import settings
 
 
@@ -50,3 +51,4 @@ async def root():
 # Include Routers
 app.include_router(auth_router)
 app.include_router(wallet_router)
+app.include_router(transaction_router)

@@ -18,6 +18,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 password_hash = PasswordHash.recommended()
 DUMMY_HASH = password_hash.hash("dummy-password")
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 from .role import Roles
 
@@ -95,6 +96,7 @@ async def get_current_verified_user(
     if not current_user.is_verified:
         raise HTTPException(status_code=400, detail="Inverified user")
     return current_user
+
 
 async def get_current_admin(
     db: Session,

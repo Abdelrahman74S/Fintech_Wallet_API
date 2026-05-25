@@ -9,6 +9,7 @@ from pydantic import computed_field
 
 if TYPE_CHECKING:
     from app.auth.model import User, UserResponse, UserResponseProfile
+    from app.Transaction.models import Transaction, TransactionResponse
 
 from .service import Money
 
@@ -49,6 +50,23 @@ class Wallet(TimestampMixin, SQLModel, table=True):
     is_active: bool = Field(default=True)
 
     user: Optional["User"] = Relationship(back_populates="wallets")
+
+    # Relationships to Transactions
+    transactions: List["Transaction"] = Relationship(
+        back_populates="wallet",
+        sa_relationship_kwargs={
+            "foreign_keys": "Transaction.wallet_id",
+            "lazy": "selectin",
+        }
+    )
+
+    counterparty_transactions: List["Transaction"] = Relationship(
+        back_populates="counterparty_wallet",
+        sa_relationship_kwargs={
+            "foreign_keys": "Transaction.counterparty_wallet_id",
+            "lazy": "selectin",
+        }
+    )
 
     __table_args__ = (
         sa.UniqueConstraint("user_id", "currency", name="unique_user_wallet_currency"),
@@ -96,13 +114,15 @@ class WalletResponse(WalletBase):
 class WalletUpdate(SQLModel):
     is_active: Optional[bool] = None
 
-
 try:
     from app.auth.model import User, UserResponse, UserResponseProfile
+    from app.Transaction.models import Transaction, TransactionResponse
     WalletResponse.model_rebuild(_types_namespace={
         "User": User,
         "UserResponse": UserResponse,
-        "UserResponseProfile": UserResponseProfile
+        "UserResponseProfile": UserResponseProfile,
+        "Transaction": Transaction,
+        "TransactionResponse": TransactionResponse
     })
 except ImportError:
     pass
