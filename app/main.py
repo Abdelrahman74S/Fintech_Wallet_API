@@ -7,6 +7,7 @@ from .wallets.router import router as wallet_router
 from .Transaction.router import router as transaction_router
 from .kyc.router import router as kyc_router  
 from .admin.router import router as admin_router
+from .TransactionFee.router import router as fee_router
 from .config import settings
 
 
@@ -56,3 +57,4 @@ app.include_router(wallet_router)
 app.include_router(transaction_router)
 app.include_router(kyc_router)
 app.include_router(admin_router)
+app.include_router(fee_router)
