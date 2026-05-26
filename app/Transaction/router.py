@@ -18,6 +18,8 @@ from app.Transaction.models import (
     DepositWithdrawRequest,
 )
 
+from app.kyc.models import KYCSubmission, DocStatus
+
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 
 
@@ -47,7 +49,21 @@ async def transfer_money(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Counterparty wallet ID is required for a transfer."
+            
         )
+        
+    kyc = await db.execute(
+        select(KYCSubmission).where(KYCSubmission.user_id == current_user.id)
+    )
+    kyc_submission = kyc.scalars().first()
+    
+    if not kyc_submission or kyc_submission.status != DocStatus.approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="KYC verification is required and must be approved to perform withdrawals."
+        )
+    
+    
 
     # 2. Acquire locks in a consistent UUID-sorted order to prevent deadlocks under concurrency
     wallet_ids = sorted([transfer_data.wallet_id, transfer_data.counterparty_wallet_id])
@@ -179,6 +195,19 @@ async def deposit_money(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Deposit amount must be greater than zero."
         )
+    
+    kyc = await db.execute(
+    select(KYCSubmission).where(KYCSubmission.user_id == current_user.id)
+    )
+    
+    kyc_submission = kyc.scalars().first()
+    
+    if not kyc_submission or kyc_submission.status != DocStatus.approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="KYC verification is required and must be approved to perform withdrawals."
+        )
+    
 
     try:
         # Load and lock the wallet
@@ -249,6 +278,17 @@ async def withdraw_money(
     """
     Safely withdraw money from a wallet.
     """
+    kyc = await db.execute(
+        select(KYCSubmission).where(KYCSubmission.user_id == current_user.id)
+    )
+    kyc_submission = kyc.scalars().first()
+    
+    if not kyc_submission or kyc_submission.status != DocStatus.approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="KYC verification is required and must be approved to perform withdrawals."
+        )
+    
     if withdraw_data.amount_cents <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
