@@ -56,20 +56,18 @@ async def _validate_and_save(file: UploadFile, user_id: uuid.UUID) -> str:
     summary="Submit KYC document",
 )
 async def submit_kyc(
-    # ── Form fields ─────────────────────────────────────────────────────────
     document_type: Annotated[DocType, Form(...)],
     full_name: Annotated[str, Form(..., min_length=2, max_length=128)],
     document_number: Annotated[str, Form(..., min_length=4, max_length=64)],
-    # ── File field ───────────────────────────────────────────────────────────
     document_file: Annotated[UploadFile, File(..., description="ID scan (JPEG/PNG/PDF, ≤5 MB)")],
-    # ── Dependencies ─────────────────────────────────────────────────────────
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> KYCSubmissionResponse:
 
-    existing = session.exec(
+    result = await session.execute(
         select(KYCSubmission).where(KYCSubmission.user_id == current_user.id)
-    ).first()
+    )
+    existing = result.scalars().first()
 
     if existing:
         raise HTTPException(
@@ -90,7 +88,7 @@ async def submit_kyc(
     )
 
     session.add(submission)
-    session.commit()
-    session.refresh(submission)
+    await session.commit()
+    await session.refresh(submission)
 
     return KYCSubmissionResponse.model_validate(submission)
