@@ -2,6 +2,7 @@ from pydantic import EmailStr
 from sqlmodel import Field, Relationship, SQLModel
 from datetime import UTC, datetime
 from typing import Optional, List ,TYPE_CHECKING
+
 from .time import TimestampMixin
 from .role import Roles
 from uuid import UUID, uuid4
@@ -11,6 +12,8 @@ from sqlalchemy.dialects import postgresql
 
 if TYPE_CHECKING:
     from app.wallets.models import Wallet
+    from app.KYC.models import KYCSubmission
+
 
 
 class UserBase(SQLModel):
@@ -44,6 +47,11 @@ class User(TimestampMixin,UserBase, table=True):
         sa_relationship_kwargs={
             "lazy": "selectin",
         }
+    )
+    
+    kyc_submission: Optional["KYCSubmission"] = Relationship(
+    back_populates="user", 
+    sa_relationship_kwargs={"uselist": False} # للتأكيد على أنها علاقة One-to-One
     )
     
 class UserCreate(UserBase):
