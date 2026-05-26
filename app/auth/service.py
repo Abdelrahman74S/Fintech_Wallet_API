@@ -99,7 +99,6 @@ async def get_current_verified_user(
 
 
 async def get_current_admin(
-    db: Session,
     current_user: User = Depends(get_current_active_user),
 ):
     if current_user.role != Roles.ADMIN: 
