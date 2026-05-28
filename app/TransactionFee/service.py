@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 from decimal import Decimal
 from sqlmodel import select
@@ -10,7 +11,6 @@ from .calculator import compute_fee
 
 
 class FeeService:
-
     # ── FeeRule CRUD ─────────────────────────────────────────────────────────
 
     @staticmethod
@@ -56,8 +56,13 @@ class FeeService:
         rule_id: UUID,
         transaction_amount: Decimal,
         session: AsyncSession,
+        computed_fee: Optional[Decimal] = None,
+        commit: bool = False,
     ) -> TransactionFee:
-        """Compute and persist a fee for a transaction."""
+        """
+        Compute and persist a fee for a transaction.
+        Supports passing a pre-computed fee, and can either commit or flush to the session.
+        """
         rule = await FeeService.get_rule(rule_id, session)
 
         if not rule.is_active:
@@ -66,7 +71,8 @@ class FeeService:
                 detail=f"Fee rule '{rule.name}' is inactive.",
             )
 
-        fee_amount = compute_fee(rule, transaction_amount)
+        # Use pre-computed fee if provided, otherwise compute dynamically
+        fee_amount = computed_fee if computed_fee is not None else compute_fee(rule, transaction_amount)
 
         record = TransactionFee(
             transaction_id=transaction_id,
@@ -81,8 +87,13 @@ class FeeService:
         )
 
         session.add(record)
-        await session.commit()
-        await session.refresh(record)
+        
+        if commit:
+            await session.commit()
+            await session.refresh(record)
+        else:
+            await session.flush()
+            
         return record
 
     @staticmethod
@@ -130,3 +141,15 @@ class FeeService:
             select(TransactionFee).where(TransactionFee.user_id == user_id)
         )
         return result.scalars().all()
+    
+    @staticmethod
+    async def calculate_transfer_fee(transaction_amount: Decimal, session: AsyncSession) -> tuple[Optional[FeeRule], Decimal]:
+        q = select(FeeRule).where(FeeRule.is_active == True)
+        result = await session.execute(q)
+        rule = result.scalars().first()
+        
+        if not rule:
+            return None, Decimal("0.00")
+            
+        fee_amount = compute_fee(rule, transaction_amount)
+        return rule, fee_amount

@@ -4,6 +4,7 @@ from sqlmodel import select
 from typing import List, Optional
 from uuid import UUID
 
+from app.TransactionFee.service import FeeService
 from app.database import get_db
 from app.auth.service import get_current_active_user
 from app.auth.model import User
@@ -20,125 +21,80 @@ from app.Transaction.models import (
 
 from app.kyc.models import KYCSubmission, DocStatus
 
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+
+limiter = Limiter(key_func=get_remote_address)
+
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
+
+router.state.limiter = limiter
+router.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @router.post("/transfer", response_model=TransactionResponse, status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
 async def transfer_money(
     transfer_data: TransactionCreate,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Safely transfer money between two wallets in a deadlock-free and race-condition-protected transaction.
-    """
-    # 1. Basic validation
+    
     if transfer_data.amount_cents <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Transfer amount must be greater than zero."
-        )
+        raise HTTPException(status_code=400, detail="Transfer amount must be greater than zero.")
 
     if transfer_data.wallet_id == transfer_data.counterparty_wallet_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot transfer to the same wallet."
-        )
-
-    if not transfer_data.counterparty_wallet_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Counterparty wallet ID is required for a transfer."
-            
-        )
+        raise HTTPException(status_code=400, detail="Cannot transfer to the same wallet.")
         
-    kyc = await db.execute(
-        select(KYCSubmission).where(KYCSubmission.user_id == current_user.id)
-    )
+    kyc = await db.execute(select(KYCSubmission).where(KYCSubmission.user_id == current_user.id))
     kyc_submission = kyc.scalars().first()
-    
     if not kyc_submission or kyc_submission.status != DocStatus.approved:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="KYC verification is required and must be approved to perform withdrawals."
-        )
-    
-    
+        raise HTTPException(status_code=403, detail="KYC verification is required and must be approved.")
 
-    # 2. Acquire locks in a consistent UUID-sorted order to prevent deadlocks under concurrency
     wallet_ids = sorted([transfer_data.wallet_id, transfer_data.counterparty_wallet_id])
 
     try:
-        # Load and lock the wallets using row-level write locks (FOR UPDATE)
         stmt_1 = select(Wallet).where(Wallet.id == wallet_ids[0]).with_for_update()
         stmt_2 = select(Wallet).where(Wallet.id == wallet_ids[1]).with_for_update()
-
-        res_1 = await db.execute(stmt_1)
-        wallet_1 = res_1.scalars().first()
-
-        res_2 = await db.execute(stmt_2)
-        wallet_2 = res_2.scalars().first()
+        wallet_1 = (await db.execute(stmt_1)).scalars().first()
+        wallet_2 = (await db.execute(stmt_2)).scalars().first()
 
         if not wallet_1 or not wallet_2:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="One or both of the specified wallets were not found."
-            )
+            raise HTTPException(status_code=404, detail="One or both wallets were not found.")
 
-        # Identify source and destination wallets from locked records
-        if wallet_1.id == transfer_data.wallet_id:
-            source_wallet = wallet_1
-            destination_wallet = wallet_2
-        else:
-            source_wallet = wallet_2
-            destination_wallet = wallet_1
+        source_wallet = wallet_1 if wallet_1.id == transfer_data.wallet_id else wallet_2
+        destination_wallet = wallet_2 if wallet_1.id == transfer_data.wallet_id else wallet_1
 
-        # 3. Ownership and Business logic checks
         if source_wallet.user_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not own the source wallet."
-            )
+            raise HTTPException(status_code=403, detail="You do not own the source wallet.")
+        if not source_wallet.is_active or not destination_wallet.is_active:
+            raise HTTPException(status_code=400, detail="One of the wallets is inactive.")
+        if source_wallet.currency != destination_wallet.currency or source_wallet.currency != transfer_data.currency.upper():
+            raise HTTPException(status_code=400, detail="Currency mismatch.")
 
-        if not source_wallet.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Source wallet is currently inactive."
-            )
-
-        if not destination_wallet.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Destination wallet is currently inactive."
-            )
-
-        if source_wallet.currency != destination_wallet.currency:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Currency mismatch. Source wallet is in {source_wallet.currency} while destination wallet is in {destination_wallet.currency}."
-            )
-
-        if source_wallet.currency != transfer_data.currency.upper():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Requested currency {transfer_data.currency} does not match source wallet currency {source_wallet.currency}."
-            )
-
-        # 4. Perform the balance updates
         transfer_money_obj = Money(amount_minor=transfer_data.amount_cents, currency=source_wallet.currency)
         
+        fee_rule, fee_amount_major = await FeeService.calculate_transfer_fee(
+            transaction_amount=transfer_money_obj.amount_major, 
+            session=db
+        )
+        
+        fee_money_obj = Money.from_major(amount_major=fee_amount_major, currency=source_wallet.currency)
+
         try:
-            source_wallet.withdraw(transfer_money_obj)
+            source_wallet.withdraw(transfer_money_obj) 
+            if fee_money_obj.amount_minor > 0:
+                source_wallet.withdraw(fee_money_obj) 
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e)
+                detail=f"Insufficient funds to cover transfer and fee ({fee_amount_major} {source_wallet.currency})."
             )
 
         destination_wallet.deposit(transfer_money_obj)
 
-        # 5. Create transaction ledger records for both wallets
-        # Sender's transaction
         sender_transaction = Transaction(
             wallet_id=source_wallet.id,
             transaction_type=TransactionType.TRANSFER,
@@ -150,7 +106,6 @@ async def transfer_money(
         )
         db.add(sender_transaction)
 
-        # Recipient's transaction
         recipient_transaction = Transaction(
             wallet_id=destination_wallet.id,
             transaction_type=TransactionType.TRANSFER,
@@ -162,11 +117,25 @@ async def transfer_money(
         )
         db.add(recipient_transaction)
 
-        # Save all changes to the database
         db.add(source_wallet)
         db.add(destination_wallet)
-        await db.commit()
+        
+        await db.flush()
 
+        if fee_rule and fee_amount_major > 0:
+            fee_record = await FeeService.apply_fee(
+                transaction_id=sender_transaction.id,
+                user_id=current_user.id,
+                rule_id=fee_rule.id,
+                transaction_amount=transfer_money_obj.amount_major,
+                computed_fee=fee_amount_major,
+                session=db
+            )
+            await FeeService.mark_applied(fee_id=fee_record.id, session=db)
+            sender_transaction.fee_id = fee_record.id
+            db.add(sender_transaction)
+
+        await db.commit()
         await db.refresh(sender_transaction)
         return sender_transaction
 
@@ -175,13 +144,10 @@ async def transfer_money(
         raise
     except Exception as e:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during transfer: {str(e)}"
-        )
-
+        raise HTTPException(status_code=500, detail=f"An error occurred during transfer: {str(e)}")
 
 @router.post("/deposit", response_model=TransactionResponse, status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
 async def deposit_money(
     deposit_data: DepositWithdrawRequest,
     current_user: User = Depends(get_current_active_user),
@@ -270,6 +236,7 @@ async def deposit_money(
 
 
 @router.post("/withdraw", response_model=TransactionResponse, status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
 async def withdraw_money(
     withdraw_data: DepositWithdrawRequest,
     current_user: User = Depends(get_current_active_user),
@@ -363,6 +330,7 @@ async def withdraw_money(
 
 
 @router.get("/history", response_model=List[TransactionResponse], status_code=status.HTTP_200_OK)
+@limiter.limit("20/minute")
 async def get_transaction_history(
     wallet_id: Optional[UUID] = None,
     transaction_type: Optional[TransactionType] = None,

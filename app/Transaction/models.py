@@ -13,6 +13,7 @@ from pydantic import computed_field
 
 if TYPE_CHECKING:
     from app.wallets.models import Wallet, WalletResponse
+    from app.TransactionFee.models import TransactionFee
 
 
 class TransactionType(str, Enum):
@@ -117,6 +118,17 @@ class Transaction(TimestampMixin, SQLModel, table=True):
             index=True,
         )
     )
+    
+    fee_id: Optional[UUID] = Field(
+        default=None,
+        sa_column=sa.Column(
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("transaction_fees.id"),
+            nullable=True,
+            index=True,
+        )
+    )
+
 
     # Relationships
     wallet: Optional["Wallet"] = Relationship(
@@ -129,6 +141,13 @@ class Transaction(TimestampMixin, SQLModel, table=True):
     counterparty_wallet: Optional["Wallet"] = Relationship(
         sa_relationship_kwargs={
             "foreign_keys": "Transaction.counterparty_wallet_id",
+            "lazy": "selectin",
+        }
+    )
+    
+    transaction_fee: Optional["TransactionFee"] = Relationship(
+        sa_relationship_kwargs={
+            "foreign_keys": "Transaction.fee_id",
             "lazy": "selectin",
         }
     )

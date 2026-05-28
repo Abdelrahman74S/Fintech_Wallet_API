@@ -106,7 +106,7 @@ async def get_frozen_wallets(
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required.")
 
-    result = await session.execute(select(Wallet).where(Wallet.is_frozen == True))
+    result = await session.execute(select(Wallet).where(Wallet.is_active == False))
     frozen_wallets = result.scalars().all()
 
     if not frozen_wallets:
@@ -131,7 +131,7 @@ async def update_wallet_status(
     if not wallet:
         raise HTTPException(status_code=404, detail="Wallet not found.")
 
-    wallet.is_active = is_frozen
+    wallet.is_active = not is_frozen
     session.add(wallet)
     await session.commit()
     await session.refresh(wallet)

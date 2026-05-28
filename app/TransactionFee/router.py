@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, status, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.auth.service import get_current_active_user
+from app.auth.service import get_current_active_user, get_current_admin
 from app.auth.model import User
 from app.auth.role import Roles
 from .models import FeeRule, TransactionFee
@@ -17,14 +17,6 @@ from .service import FeeService
 router = APIRouter(prefix="/fees", tags=["Fees"])
 
 
-async def require_admin(current_user: User = Depends(get_current_active_user)) -> User:
-    if current_user.role != Roles.ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="The user does not have enough privileges",
-        )
-    return current_user
-
 
 # ── Fee Rules (admin) ────────────────────────────────────────────────────────
 
@@ -32,7 +24,7 @@ async def require_admin(current_user: User = Depends(get_current_active_user)) -
 async def create_fee_rule(
     data: FeeRuleCreate,
     session: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(require_admin)],
+    _: Annotated[User, Depends(get_current_admin)],
 ):
     return await FeeService.create_rule(data, session)
 
@@ -58,7 +50,7 @@ async def update_fee_rule(
     rule_id: UUID,
     data: FeeRuleUpdate,
     session: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(require_admin)],
+    _: Annotated[User, Depends(get_current_admin)],
 ):
     return await FeeService.update_rule(rule_id, data, session)
 
@@ -87,7 +79,7 @@ async def waive_fee(
     fee_id: UUID,
     body: WaiveFeeRequest,
     session: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(require_admin)],
+    _: Annotated[User, Depends(get_current_admin)],
 ):
     return await FeeService.waive_fee(fee_id, body.reason, session)
 
@@ -96,6 +88,6 @@ async def waive_fee(
 async def apply_fee(
     fee_id: UUID,
     session: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(require_admin)],
+    _: Annotated[User, Depends(get_current_admin)],
 ):
     return await FeeService.mark_applied(fee_id, session)

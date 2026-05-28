@@ -50,9 +50,14 @@ class User(TimestampMixin,UserBase, table=True):
     )
     
     kyc_submission: Optional["KYCSubmission"] = Relationship(
-    back_populates="user", 
-    sa_relationship_kwargs={"uselist": False} # للتأكيد على أنها علاقة One-to-One
+        back_populates="user", 
+        sa_relationship_kwargs={"uselist": False}
     )
+
+    @property
+    def is_admin(self) -> bool:
+        from .role import Roles
+        return self.role == Roles.ADMIN
     
 class UserCreate(UserBase):
     password: str

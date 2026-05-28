@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     description="A comprehensive Fintech Wallet API for managing users, wallets, and transactions.",
-    version="1.1.0",
+    version="2.1.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
