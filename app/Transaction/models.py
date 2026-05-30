@@ -123,7 +123,7 @@ class Transaction(TimestampMixin, SQLModel, table=True):
         default=None,
         sa_column=sa.Column(
             postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("transaction_fees.id"),
+            sa.ForeignKey("transaction_fees.id", use_alter=True, name="fk_transactions_fee_id"),
             nullable=True,
             index=True,
         )

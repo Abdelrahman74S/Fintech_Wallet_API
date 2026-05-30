@@ -2,14 +2,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.Transaction.router import limiter 
+
 from .auth.router import router as auth_router
 from .wallets.router import router as wallet_router
 from .Transaction.router import router as transaction_router
-from .kyc.router import router as kyc_router  
+from .kyc.router import router as kyc_router
 from .admin.router import router as admin_router
-from .TransactionFee.router import router as fee_router
 from .config import settings
-
+from .TransactionFee.router import router as fee_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -26,6 +29,10 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS Configuration
 app.add_middleware(
@@ -51,7 +58,6 @@ async def root():
     }
 
 
-# Include Routers
 app.include_router(auth_router)
 app.include_router(wallet_router)
 app.include_router(transaction_router)

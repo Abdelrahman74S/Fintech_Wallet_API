@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 from typing import List, Optional
@@ -30,13 +30,14 @@ limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/transactions", tags=["Transactions"])
 
-router.state.limiter = limiter
-router.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# router.state.limiter = limiter
+# router.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @router.post("/transfer", response_model=TransactionResponse, status_code=status.HTTP_200_OK)
 @limiter.limit("5/minute")
 async def transfer_money(
+    request: Request,
     transfer_data: TransactionCreate,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
@@ -149,6 +150,7 @@ async def transfer_money(
 @router.post("/deposit", response_model=TransactionResponse, status_code=status.HTTP_200_OK)
 @limiter.limit("5/minute")
 async def deposit_money(
+    request: Request,
     deposit_data: DepositWithdrawRequest,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
@@ -238,6 +240,7 @@ async def deposit_money(
 @router.post("/withdraw", response_model=TransactionResponse, status_code=status.HTTP_200_OK)
 @limiter.limit("5/minute")
 async def withdraw_money(
+    request: Request,
     withdraw_data: DepositWithdrawRequest,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
@@ -332,6 +335,7 @@ async def withdraw_money(
 @router.get("/history", response_model=List[TransactionResponse], status_code=status.HTTP_200_OK)
 @limiter.limit("20/minute")
 async def get_transaction_history(
+    request: Request,
     wallet_id: Optional[UUID] = None,
     transaction_type: Optional[TransactionType] = None,
     limit: int = 20,

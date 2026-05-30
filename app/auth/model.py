@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 
 if TYPE_CHECKING:
     from app.wallets.models import Wallet
-    from app.KYC.models import KYCSubmission
+    from app.kyc.models import KYCSubmission
 
 
 

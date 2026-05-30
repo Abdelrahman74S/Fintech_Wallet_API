@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     
     DATABASE_URL: str = Field(..., alias="DATABASE_URL")
-    
+    TEST_DATABASE_URL: Optional[str] = Field(None, alias="TEST_DATABASE_URL")
     SECRET_KEY: str
     ALGORITHM: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
