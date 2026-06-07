@@ -2,6 +2,7 @@ import uuid
 from uuid import UUID
 from enum import Enum
 from datetime import datetime
+from decimal import Decimal
 import random
 import string
 from typing import Optional, TYPE_CHECKING
@@ -168,7 +169,7 @@ class TransactionCreate(SQLModel):
     wallet_id: UUID
     transaction_type: TransactionType
     transaction_status: TransactionStatus = Field(default=TransactionStatus.PENDING)
-    amount_cents: int
+    amount: Decimal = Field(..., gt=0)
     currency: str = Field(default="EGP", max_length=3)
     description: Optional[str] = None
     counterparty_wallet_id: Optional[UUID] = None
@@ -192,7 +193,7 @@ class TransactionResponse(TransactionBase):
 
 class DepositWithdrawRequest(SQLModel):
     wallet_id: UUID
-    amount_cents: int
+    amount: Decimal = Field(..., gt=0)
     currency: str = Field(default="EGP", max_length=3)
     description: Optional[str] = None
 

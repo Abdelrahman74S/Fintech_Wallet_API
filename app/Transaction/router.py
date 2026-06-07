@@ -43,7 +43,7 @@ async def transfer_money(
     db: AsyncSession = Depends(get_db)
 ):
     
-    if transfer_data.amount_cents <= 0:
+    if transfer_data.amount <= 0:
         raise HTTPException(status_code=400, detail="Transfer amount must be greater than zero.")
 
     if transfer_data.wallet_id == transfer_data.counterparty_wallet_id:
@@ -75,7 +75,7 @@ async def transfer_money(
         if source_wallet.currency != destination_wallet.currency or source_wallet.currency != transfer_data.currency.upper():
             raise HTTPException(status_code=400, detail="Currency mismatch.")
 
-        transfer_money_obj = Money(amount_minor=transfer_data.amount_cents, currency=source_wallet.currency)
+        transfer_money_obj = Money.from_major(amount_major=transfer_data.amount, currency=source_wallet.currency)
         
         fee_rule, fee_amount_major = await FeeService.calculate_transfer_fee(
             transaction_amount=transfer_money_obj.amount_major, 
@@ -100,7 +100,7 @@ async def transfer_money(
             wallet_id=source_wallet.id,
             transaction_type=TransactionType.TRANSFER,
             status=TransactionStatus.COMPLETED,
-            amount_cents=transfer_data.amount_cents,
+            amount_cents=transfer_money_obj.amount_minor,
             currency=source_wallet.currency,
             description=transfer_data.description or f"Sent transfer to wallet {destination_wallet.id}",
             counterparty_wallet_id=destination_wallet.id
@@ -111,7 +111,7 @@ async def transfer_money(
             wallet_id=destination_wallet.id,
             transaction_type=TransactionType.TRANSFER,
             status=TransactionStatus.COMPLETED,
-            amount_cents=transfer_data.amount_cents,
+            amount_cents=transfer_money_obj.amount_minor,
             currency=destination_wallet.currency,
             description=transfer_data.description or f"Received transfer from wallet {source_wallet.id}",
             counterparty_wallet_id=source_wallet.id
@@ -158,7 +158,7 @@ async def deposit_money(
     """
     Safely deposit money into a wallet.
     """
-    if deposit_data.amount_cents <= 0:
+    if deposit_data.amount <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Deposit amount must be greater than zero."
@@ -176,7 +176,7 @@ async def deposit_money(
             detail="KYC verification is required and must be approved to perform withdrawals."
         )
     
-
+ 
     try:
         # Load and lock the wallet
         stmt = select(Wallet).where(Wallet.id == deposit_data.wallet_id).with_for_update()
@@ -207,14 +207,14 @@ async def deposit_money(
                 detail=f"Deposit currency {deposit_data.currency} does not match wallet currency {wallet.currency}."
             )
 
-        deposit_money_obj = Money(amount_minor=deposit_data.amount_cents, currency=wallet.currency)
+        deposit_money_obj = Money.from_major(amount_major=deposit_data.amount, currency=wallet.currency)
         wallet.deposit(deposit_money_obj)
 
         new_transaction = Transaction(
             wallet_id=wallet.id,
             transaction_type=TransactionType.DEPOSIT,
             status=TransactionStatus.COMPLETED,
-            amount_cents=deposit_data.amount_cents,
+            amount_cents=deposit_money_obj.amount_minor,
             currency=wallet.currency,
             description=deposit_data.description or "Deposit",
         )
@@ -259,7 +259,7 @@ async def withdraw_money(
             detail="KYC verification is required and must be approved to perform withdrawals."
         )
     
-    if withdraw_data.amount_cents <= 0:
+    if withdraw_data.amount <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Withdrawal amount must be greater than zero."
@@ -295,7 +295,7 @@ async def withdraw_money(
                 detail=f"Withdrawal currency {withdraw_data.currency} does not match wallet currency {wallet.currency}."
             )
 
-        withdraw_money_obj = Money(amount_minor=withdraw_data.amount_cents, currency=wallet.currency)
+        withdraw_money_obj = Money.from_major(amount_major=withdraw_data.amount, currency=wallet.currency)
         
         try:
             wallet.withdraw(withdraw_money_obj)
@@ -309,7 +309,7 @@ async def withdraw_money(
             wallet_id=wallet.id,
             transaction_type=TransactionType.WITHDRAWAL,
             status=TransactionStatus.COMPLETED,
-            amount_cents=withdraw_data.amount_cents,
+            amount_cents=withdraw_money_obj.amount_minor,
             currency=wallet.currency,
             description=withdraw_data.description or "Withdrawal",
         )
@@ -338,13 +338,19 @@ async def get_transaction_history(
     request: Request,
     wallet_id: Optional[UUID] = None,
     transaction_type: Optional[TransactionType] = None,
+    status: Optional[TransactionStatus] = None,
+    search: Optional[str] = None,
+    min_amount: Optional[int] = None,
+    max_amount: Optional[int] = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
     limit: int = 20,
     offset: int = 0,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    List transaction history for any of the user's active wallets with filters and pagination.
+    List transaction history for any of the user's active wallets with sorting, filtering, searching, and pagination.
     """
     # 1. Fetch user's wallets to ensure authorization
     wallets_stmt = select(Wallet.id).where(Wallet.user_id == current_user.id)
@@ -368,11 +374,37 @@ async def get_transaction_history(
     else:
         stmt = stmt.where(Transaction.wallet_id.in_(user_wallet_ids))
 
+    # Apply filters
     if transaction_type:
         stmt = stmt.where(Transaction.transaction_type == transaction_type)
+    if status:
+        stmt = stmt.where(Transaction.status == status)
+    if min_amount is not None:
+        stmt = stmt.where(Transaction.amount_cents >= min_amount)
+    if max_amount is not None:
+        stmt = stmt.where(Transaction.amount_cents <= max_amount)
 
-    # 3. Apply pagination and sorting
-    stmt = stmt.order_by(Transaction.created_at.desc())
+    # Apply search (reference or description case-insensitively)
+    if search:
+        search_term = f"%{search}%"
+        stmt = stmt.where(
+            (Transaction.reference.ilike(search_term)) |
+            (Transaction.description.ilike(search_term))
+        )
+
+    # 3. Apply sorting
+    sort_field = Transaction.created_at
+    if sort_by == "amount_cents":
+        sort_field = Transaction.amount_cents
+    elif sort_by == "status":
+        sort_field = Transaction.status
+
+    if sort_order.lower() == "asc":
+        stmt = stmt.order_by(sort_field.asc())
+    else:
+        stmt = stmt.order_by(sort_field.desc())
+
+    # 4. Apply pagination
     stmt = stmt.limit(limit).offset(offset)
 
     result = await db.execute(stmt)

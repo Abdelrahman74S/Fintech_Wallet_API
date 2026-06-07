@@ -9,6 +9,10 @@ from sqlmodel import SQLModel
 from app.config import settings
 from app.main import app
 from app.database import get_db
+from app.Transaction.router import limiter
+
+# Disable rate limiter for testing
+limiter.enabled = False
 
 TEST_DATABASE_URL = settings.TEST_DATABASE_URL
 

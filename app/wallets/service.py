@@ -1,7 +1,10 @@
+from decimal import Decimal
+
 class Currency:
     def __init__(self, code: str, minor_unit: int):
         self.code = code.upper()
         self.minor_unit = minor_unit  
+
 
 CURRENCIES = {
     "EGP": Currency("EGP", 100),  
@@ -39,6 +42,16 @@ class Money:
     
     def to_major(self):
         return self.amount_minor / self.currency_info().minor_unit
+
+    @property
+    def amount_major(self) -> Decimal:
+        return Decimal(str(self.amount_minor)) / Decimal(str(self.currency_info().minor_unit))
+
+    @classmethod
+    def from_major(cls, amount_major: Decimal, currency: str) -> "Money":
+        minor_unit = CURRENCIES[currency.upper()].minor_unit
+        amount_minor = int(amount_major * Decimal(str(minor_unit)))
+        return cls(amount_minor=amount_minor, currency=currency)
 
     def __repr__(self):
         return f"{self.to_major()} {self.currency}"
