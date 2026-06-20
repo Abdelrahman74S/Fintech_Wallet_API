@@ -64,3 +64,23 @@ app.include_router(transaction_router)
 app.include_router(kyc_router)
 app.include_router(admin_router)
 app.include_router(fee_router)
+
+ 
+"""
+Docker Basics 
+    ↓
+Dockerfile
+    ↓
+Volumes
+    ↓
+Networking
+    ↓
+Docker Compose
+    ↓
+Dockerizing Real Projects
+    ↓
+CI/CD Integration
+    ↓
+Kubernetes
+
+"""
