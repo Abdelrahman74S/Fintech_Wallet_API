@@ -73,3 +73,13 @@ class KYCSubmissionResponse(TimestampMixin,SQLModel):
 
     class Config:
         from_attributes = True
+
+class UploadRequest(SQLModel):
+    file_name: str
+    content_type: str
+
+class KYCSubmitRequest(SQLModel):
+    document_type: DocType
+    full_name: str = Field(..., min_length=2, max_length=128)
+    document_number: str = Field(..., min_length=4, max_length=64)
+    object_name: str

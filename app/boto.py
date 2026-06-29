@@ -52,3 +52,33 @@ def generate_presigned_download_url(bucket_name: str, object_name: str, expires_
     except Exception as e:
         print(f"Error generating presigned URL: {e}")
         raise e
+
+def delete_file(bucket_name: str, object_name: str):
+    """Delete a file from the specified bucket."""
+    try:
+        client.delete_object(Bucket=bucket_name, Key=object_name)
+        print(f"File '{object_name}' deleted successfully from bucket '{bucket_name}'.")
+    except Exception as e:
+        print(f"Error deleting file '{object_name}' from bucket '{bucket_name}': {e}")
+        raise e
+
+def generate_presigned_upload_post(bucket_name: str, object_name: str, content_type: str, max_size_mb: int = 10):
+    """Generate a presigned POST policy and signature for direct client-side upload."""
+    try:
+        check_and_create_bucket(bucket_name)
+        max_size_bytes = max_size_mb * 1024 * 1024
+        
+        response = client.generate_presigned_post(
+            Bucket=bucket_name,
+            Key=object_name,
+            Fields={"Content-Type": content_type},
+            Conditions=[
+                {"Content-Type": content_type},
+                ["content-length-range", 0, max_size_bytes]
+            ],
+            ExpiresIn=600  # 10 minutes
+        )
+        return response
+    except Exception as e:
+        print(f"Error generating presigned post: {e}")
+        raise e

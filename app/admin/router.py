@@ -1,6 +1,7 @@
 from app.auth.service import get_current_admin
 from app.database import get_db
-from typing import  Annotated, Optional
+from typing import  Annotated, Optional , List
+from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth.model import User
 from app.kyc.models import KYCSubmission, DocType , DocStatus, KYCSubmissionResponse
 import uuid
@@ -9,23 +10,13 @@ from sqlmodel import select
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
-router = APIRouter(prefix="/admin", tags=["Admin"])
-
-
-from app.auth.service import get_current_admin
-from app.database import get_db
-from typing import Annotated, List 
-from app.auth.model import User
-from app.kyc.models import KYCSubmission, KYCSubmissionResponse
-
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
-from fastapi import APIRouter, Depends, HTTPException, status
 from app.Transaction.models import Transaction , TransactionResponse
 from app.wallets.models import Wallet, WalletResponse
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
+
+from app.boto import generate_presigned_download_url, delete_file
 
 @router.get("/kyc-submissions", response_model=List[KYCSubmissionResponse])
 async def get_kyc(
@@ -40,18 +31,29 @@ async def get_kyc(
     
     if not submissions:
         raise HTTPException(status_code=404, detail="No KYC submissions found.")
+    
+    response_list = []
+    for sub in submissions:
+        res = KYCSubmissionResponse.model_validate(sub)
+        if res.file_url:
+            res.file_url = generate_presigned_download_url(
+                bucket_name="kyc-documents",
+                object_name=res.file_url,
+                expires_in=3600
+            )
+        response_list.append(res)
         
-    return submissions
+    return response_list
 
 
-@router.patch("/kyc/{submission_id}/review")
+@router.patch("/kyc/{submission_id}/review", response_model=KYCSubmissionResponse)
 async def review_kyc(
     current_user: Annotated[User, Depends(get_current_admin)],
     session: Annotated[AsyncSession, Depends(get_db)],
     submission_id: uuid.UUID,
     status: DocStatus,
     rejection_reason: Optional[str] = None,
-):
+) -> KYCSubmissionResponse:
     
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required.")
@@ -73,12 +75,26 @@ async def review_kyc(
     submission.status = status
     submission.rejection_reason = rejection_reason if status == DocStatus.rejected else None
     
-
+    if status == DocStatus.rejected and submission.file_url:
+        try:
+            delete_file(bucket_name="kyc-documents", object_name=submission.file_url)
+        except Exception as e:
+            print(f"Failed to delete file from MinIO: {e}")
+        submission.file_url = None
+    
     session.add(submission)
     await session.commit()
     await session.refresh(submission)
     
-    return {"message": f"KYC submission {status.value} successfully."}
+    response_data = KYCSubmissionResponse.model_validate(submission)
+    if response_data.file_url:
+        response_data.file_url = generate_presigned_download_url(
+            bucket_name="kyc-documents",
+            object_name=response_data.file_url,
+            expires_in=3600
+        )
+        
+    return response_data
 
 
 @router.get("/Transactions", response_model=List[TransactionResponse])
